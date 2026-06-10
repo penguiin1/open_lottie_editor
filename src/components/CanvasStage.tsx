@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import lottie, { type AnimationItem } from 'lottie-web'
 import { useStore } from '../store/useStore'
 import { getValue } from '../lottie/props'
-import { getPathVertices, type PenPoint } from '../lottie/path'
+import { getPathGeometry, type PenPoint } from '../lottie/path'
 
 function draftPathD(points: PenPoint[], scale: number): string {
   if (points.length === 0) return ''
@@ -43,7 +43,7 @@ export default function CanvasStage() {
   const scale = stageSize.w / doc.w
   const selLayer = doc.layers.find((l) => l.ind === selectedInd)
   const selName = selLayer?.nm
-  const pathVerts = tool === 'select' && selLayer ? getPathVertices(selLayer) : null
+  const pathGeo = tool === 'select' && selLayer ? getPathGeometry(selLayer) : null
 
   // Fit the stage to the available area, preserving the comp's aspect ratio.
   useEffect(() => {
@@ -219,13 +219,50 @@ export default function CanvasStage() {
     window.addEventListener('pointerup', up)
   }
 
+  /** Plain drag moves the vertex; Alt+drag pulls out symmetric tangents
+   *  (corner → smooth); Alt+click (no movement) deletes the vertex. */
   const onVertexDown = (e: React.PointerEvent, vi: number) => {
     e.stopPropagation()
     e.preventDefault()
     const st = useStore.getState()
     if (st.selectedInd == null) return
     const ind = st.selectedInd
-    const overlay = (e.currentTarget as SVGElement).closest('.stage') as HTMLElement
+    const stage = (e.currentTarget as SVGElement).closest('.stage') as HTMLElement
+    st.setPlaying(false)
+    const alt = e.altKey
+    const startX = e.clientX
+    const startY = e.clientY
+    let snapshotted = false
+    let moved = false
+    const move = (ev: PointerEvent) => {
+      if (!moved && Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) < 3) return
+      moved = true
+      if (!snapshotted) {
+        snapshotted = true
+        useStore.getState().beginEdit()
+      }
+      const pt = toComp(ev, stage)
+      if (alt) useStore.getState().movePathTangent(ind, vi, 'out', pt.x, pt.y, true, false)
+      else useStore.getState().movePathVertex(ind, vi, pt.x, pt.y, false)
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      if (alt && !moved) useStore.getState().deletePathVertex(ind, vi)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
+  /** Drag a tangent handle. Mirrored (smooth) by default; hold Alt while
+   *  dragging to move this handle independently. */
+  const onHandleDown = (e: React.PointerEvent, vi: number, which: 'in' | 'out') => {
+    e.stopPropagation()
+    e.preventDefault()
+    const st = useStore.getState()
+    if (st.selectedInd == null) return
+    const ind = st.selectedInd
+    const stage = (e.currentTarget as SVGElement).closest('.stage') as HTMLElement
     st.setPlaying(false)
     let snapshotted = false
     const move = (ev: PointerEvent) => {
@@ -233,8 +270,8 @@ export default function CanvasStage() {
         snapshotted = true
         useStore.getState().beginEdit()
       }
-      const pt = toComp(ev, overlay)
-      useStore.getState().movePathVertex(ind, vi, pt.x, pt.y, false)
+      const pt = toComp(ev, stage)
+      useStore.getState().movePathTangent(ind, vi, which, pt.x, pt.y, !ev.altKey, false)
     }
     const up = () => {
       window.removeEventListener('pointermove', move)
@@ -242,6 +279,14 @@ export default function CanvasStage() {
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
+  }
+
+  const onMidDown = (e: React.PointerEvent, segIndex: number, mx: number, my: number) => {
+    e.stopPropagation()
+    e.preventDefault()
+    const st = useStore.getState()
+    if (st.selectedInd == null) return
+    st.insertPathVertex(st.selectedInd, segIndex, mx, my)
   }
 
   const penHint =
@@ -272,7 +317,7 @@ export default function CanvasStage() {
           }
         />
 
-        {(tool === 'pen' || pathVerts) && (
+        {(tool === 'pen' || pathGeo) && (
           <svg className="editing-overlay" width={stageSize.w} height={stageSize.h}>
             {tool === 'pen' && draft.length > 0 && (
               <>
@@ -297,16 +342,71 @@ export default function CanvasStage() {
                 ))}
               </>
             )}
-            {pathVerts?.map((v, i) => (
-              <circle
-                key={i}
-                cx={v.x * scale}
-                cy={v.y * scale}
-                r={5}
-                className="path-vertex"
-                onPointerDown={(e) => onVertexDown(e, i)}
-              />
-            ))}
+            {pathGeo && (
+              <>
+                {pathGeo.verts.map((v, i) => {
+                  const j = (i + 1) % pathGeo.verts.length
+                  if (!pathGeo.closed && j === 0) return null
+                  const w = pathGeo.verts[j]
+                  const mx = (v.x + w.x) / 2
+                  const my = (v.y + w.y) / 2
+                  return (
+                    <g key={`mid${i}`}>
+                      <circle
+                        cx={mx * scale}
+                        cy={my * scale}
+                        r={4}
+                        className="midpoint-marker"
+                        onPointerDown={(e) => onMidDown(e, i, mx, my)}
+                      >
+                        <title>Insert point</title>
+                      </circle>
+                    </g>
+                  )
+                })}
+                {pathGeo.verts.map((v, i) => {
+                  const handles: { which: 'in' | 'out'; h: { x: number; y: number } }[] = []
+                  if (Math.hypot(pathGeo.ins[i].x - v.x, pathGeo.ins[i].y - v.y) > 0.5) {
+                    handles.push({ which: 'in', h: pathGeo.ins[i] })
+                  }
+                  if (Math.hypot(pathGeo.outs[i].x - v.x, pathGeo.outs[i].y - v.y) > 0.5) {
+                    handles.push({ which: 'out', h: pathGeo.outs[i] })
+                  }
+                  return (
+                    <g key={`h${i}`}>
+                      {handles.map(({ which, h }) => (
+                        <g key={which}>
+                          <line
+                            x1={v.x * scale}
+                            y1={v.y * scale}
+                            x2={h.x * scale}
+                            y2={h.y * scale}
+                            className="path-handle-line"
+                          />
+                          <circle
+                            cx={h.x * scale}
+                            cy={h.y * scale}
+                            r={3.5}
+                            className="path-handle"
+                            onPointerDown={(e) => onHandleDown(e, i, which)}
+                          />
+                        </g>
+                      ))}
+                    </g>
+                  )
+                })}
+                {pathGeo.verts.map((v, i) => (
+                  <circle
+                    key={`v${i}`}
+                    cx={v.x * scale}
+                    cy={v.y * scale}
+                    r={5}
+                    className="path-vertex"
+                    onPointerDown={(e) => onVertexDown(e, i)}
+                  />
+                ))}
+              </>
+            )}
           </svg>
         )}
 
@@ -315,7 +415,10 @@ export default function CanvasStage() {
         ) : (
           selName && (
             <div className="sel-badge">
-              {selName} — drag canvas to move{pathVerts ? ' · drag dots to edit path' : ''}
+              {selName} — drag canvas to move
+              {pathGeo
+                ? ' · dots: drag move · alt-drag curve · alt-click delete · ○ insert'
+                : ''}
             </div>
           )
         )}

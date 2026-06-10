@@ -13,7 +13,9 @@ everything you make is yours.
 
 - **Shape layers** — rectangles, ellipses, stars with fill color, size, corner radius controls
 - **Pen tool** — draw free bezier paths on the canvas (click for corners, drag for curves,
-  close or leave open), then edit vertices by dragging
+  close or leave open), then edit them: drag vertices, drag tangent handles (Alt to break
+  symmetry), Alt+drag a corner to make it smooth, Alt+click to delete a point, click a
+  segment midpoint to insert one
 - **Text layers** — editable content, web-safe fonts, size, color, alignment, line height, tracking
 - **Fills** — solid colors and linear/radial gradients with editable stops and angle
 - **Keyframe animation** — position, scale, rotation, opacity with easing presets and a

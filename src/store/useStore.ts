@@ -4,7 +4,15 @@ import type { EasingName, LottieDoc, LottieLayer, TransformKey } from '../types/
 import { createEmptyDoc, createShapeLayer, nextLayerInd, type ShapeKind } from '../lottie/doc'
 import { normalizeDoc } from '../lottie/normalize'
 import { applyTextStyle, createTextLayer, type TextStyle } from '../lottie/text'
-import { createPenLayer, moveVertex, type PenPoint } from '../lottie/path'
+import {
+  createPenLayer,
+  deleteVertex,
+  getPathGeometry,
+  insertVertex,
+  moveTangent,
+  moveVertex,
+  type PenPoint,
+} from '../lottie/path'
 import {
   findPaint,
   findStroke,
@@ -79,6 +87,17 @@ interface EditorState {
   removeStroke: (ind: number) => void
   moveKeyframe: (ind: number, key: TransformKey, from: number, to: number, commit?: boolean) => void
   movePathVertex: (ind: number, vertexIndex: number, x: number, y: number, commit?: boolean) => void
+  movePathTangent: (
+    ind: number,
+    vertexIndex: number,
+    which: 'in' | 'out',
+    x: number,
+    y: number,
+    mirror: boolean,
+    commit?: boolean,
+  ) => void
+  insertPathVertex: (ind: number, segIndex: number, x: number, y: number) => void
+  deletePathVertex: (ind: number, vertexIndex: number) => void
   setTextStyle: (ind: number, patch: Partial<TextStyle>, commit?: boolean) => void
   setPropEasingCustom: (ind: number, key: TransformKey, handles: BezierHandles, commit?: boolean) => void
   // history
@@ -411,6 +430,35 @@ export const useStore = create<EditorState>()(
           if (!l) return
           if (commit) snapshot(s)
           moveVertex(l, vertexIndex, x, y)
+        }),
+
+      movePathTangent: (ind, vertexIndex, which, x, y, mirror, commit = false) =>
+        set((s) => {
+          const l = findLayer(s.doc, ind)
+          if (!l) return
+          if (commit) snapshot(s)
+          moveTangent(l, vertexIndex, which, x, y, mirror)
+        }),
+
+      insertPathVertex: (ind, segIndex, x, y) =>
+        set((s) => {
+          const l = findLayer(s.doc, ind)
+          if (!l) return
+          const geo = getPathGeometry(l)
+          if (!geo || segIndex < 0 || segIndex >= geo.verts.length) return
+          snapshot(s)
+          insertVertex(l, segIndex, x, y)
+        }),
+
+      deletePathVertex: (ind, vertexIndex) =>
+        set((s) => {
+          const l = findLayer(s.doc, ind)
+          if (!l) return
+          const geo = getPathGeometry(l)
+          if (!geo) return
+          if (geo.verts.length <= (geo.closed ? 3 : 2)) return
+          snapshot(s)
+          deleteVertex(l, vertexIndex)
         }),
 
       setTextStyle: (ind, patch, commit = true) =>

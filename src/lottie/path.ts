@@ -149,3 +149,93 @@ export function moveVertex(layer: LottieLayer, index: number, x: number, y: numb
   parts.k.v[index] = [x - parts.px, y - parts.py]
   return true
 }
+
+export interface PathGeometry {
+  verts: { x: number; y: number }[]
+  /** Absolute composition coordinates of the in/out handle tips. */
+  ins: { x: number; y: number }[]
+  outs: { x: number; y: number }[]
+  closed: boolean
+}
+
+/** Full editable geometry in composition coordinates, or null if the layer
+ *  fails the static-path guards. */
+export function getPathGeometry(layer: LottieLayer): PathGeometry | null {
+  const parts = staticPathParts(layer)
+  if (!parts) return null
+  const { k, px, py } = parts
+  const verts = k.v.map((v) => ({ x: (v?.[0] ?? 0) + px, y: (v?.[1] ?? 0) + py }))
+  const ins = verts.map((v, i) => ({
+    x: v.x + (k.i?.[i]?.[0] ?? 0),
+    y: v.y + (k.i?.[i]?.[1] ?? 0),
+  }))
+  const outs = verts.map((v, i) => ({
+    x: v.x + (k.o?.[i]?.[0] ?? 0),
+    y: v.y + (k.o?.[i]?.[1] ?? 0),
+  }))
+  return { verts, ins, outs, closed: !!k.c }
+}
+
+function ensureTangentArrays(k: { i: number[][]; o: number[][]; v: number[][] }): void {
+  if (!Array.isArray(k.i)) (k as any).i = []
+  if (!Array.isArray(k.o)) (k as any).o = []
+  while (k.i.length < k.v.length) k.i.push([0, 0])
+  while (k.o.length < k.v.length) k.o.push([0, 0])
+}
+
+/** Point a tangent handle at composition coordinates (x, y). With `mirror`
+ *  the opposite handle is set to the negation (smooth point). */
+export function moveTangent(
+  layer: LottieLayer,
+  index: number,
+  which: 'in' | 'out',
+  x: number,
+  y: number,
+  mirror: boolean,
+): boolean {
+  const parts = staticPathParts(layer)
+  if (!parts) return false
+  const { k, px, py } = parts
+  if (index < 0 || index >= k.v.length) return false
+  ensureTangentArrays(k)
+  const tx = x - px - (k.v[index]?.[0] ?? 0)
+  const ty = y - py - (k.v[index]?.[1] ?? 0)
+  if (which === 'in') {
+    k.i[index] = [tx, ty]
+    if (mirror) k.o[index] = [-tx, -ty]
+  } else {
+    k.o[index] = [tx, ty]
+    if (mirror) k.i[index] = [-tx, -ty]
+  }
+  return true
+}
+
+/** Insert a corner vertex after `segIndex` (the segment from vertex
+ *  segIndex to the next one; for closed paths the last segment wraps). */
+export function insertVertex(layer: LottieLayer, segIndex: number, x: number, y: number): boolean {
+  const parts = staticPathParts(layer)
+  if (!parts) return false
+  const { k, px, py } = parts
+  if (segIndex < 0 || segIndex >= k.v.length) return false
+  ensureTangentArrays(k)
+  const at = segIndex + 1
+  k.v.splice(at, 0, [x - px, y - py])
+  k.i.splice(at, 0, [0, 0])
+  k.o.splice(at, 0, [0, 0])
+  return true
+}
+
+/** Delete a vertex, keeping at least 3 points on closed paths and 2 on
+ *  open ones. */
+export function deleteVertex(layer: LottieLayer, index: number): boolean {
+  const parts = staticPathParts(layer)
+  if (!parts) return false
+  const k = parts.k
+  const min = k.c ? 3 : 2
+  if (k.v.length <= min) return false
+  if (index < 0 || index >= k.v.length) return false
+  k.v.splice(index, 1)
+  if (Array.isArray(k.i)) k.i.splice(index, 1)
+  if (Array.isArray(k.o)) k.o.splice(index, 1)
+  return true
+}

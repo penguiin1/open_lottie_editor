@@ -442,8 +442,54 @@ export default function PropertiesPanel() {
                       }}
                     />
                     <span style={{ color: 'var(--text-dim)' }}>%</span>
+                    <button
+                      className="link-btn"
+                      title="Remove stop"
+                      disabled={pinfo.stops.length <= 2}
+                      onClick={() => {
+                        const stops = pinfo.stops.filter((_, j) => j !== si)
+                        store().updatePaint(ind, { ...pinfo, stops })
+                      }}
+                    >
+                      ×
+                    </button>
                   </div>
                 ))}
+                <div className="prop-row">
+                  <label className="k" style={{ marginLeft: 28 }} />
+                  <button
+                    onClick={() => {
+                      // Insert into the widest gap, color interpolated.
+                      const stops = [...pinfo.stops].sort((a, b) => a.pos - b.pos)
+                      if (stops.length < 2) return
+                      let gi = 0
+                      let gap = -1
+                      for (let i = 0; i < stops.length - 1; i++) {
+                        const g = stops[i + 1].pos - stops[i].pos
+                        if (g > gap) {
+                          gap = g
+                          gi = i
+                        }
+                      }
+                      const a = stops[gi]
+                      const b = stops[gi + 1]
+                      const mid = {
+                        pos: (a.pos + b.pos) / 2,
+                        color: [
+                          (a.color[0] + b.color[0]) / 2,
+                          (a.color[1] + b.color[1]) / 2,
+                          (a.color[2] + b.color[2]) / 2,
+                        ] as [number, number, number],
+                      }
+                      store().updatePaint(ind, {
+                        ...pinfo,
+                        stops: [...stops.slice(0, gi + 1), mid, ...stops.slice(gi + 1)],
+                      })
+                    }}
+                  >
+                    + Add stop
+                  </button>
+                </div>
                 {pinfo.kind === 'linear' && (
                   <div className="prop-row">
                     <label className="k" style={{ marginLeft: 28 }}>

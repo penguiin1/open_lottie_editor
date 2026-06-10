@@ -252,6 +252,17 @@ button.tool-active {
   pointer-events: auto; cursor: grab;
 }
 .path-vertex:hover { fill: #fff; }
+.path-handle {
+  fill: var(--accent-2); stroke: #1e1e27; stroke-width: 1;
+  pointer-events: auto; cursor: grab;
+}
+.path-handle:hover { fill: #fff; }
+.path-handle-line { stroke: var(--accent-2); stroke-width: 1; opacity: .55; }
+.midpoint-marker {
+  fill: rgba(255, 255, 255, .15); stroke: var(--text-dim); stroke-width: 1;
+  pointer-events: auto; cursor: copy;
+}
+.midpoint-marker:hover { fill: var(--ok); stroke: #fff; }
 .props textarea {
   font: inherit; color: var(--text); background: var(--panel-2);
   border: 1px solid var(--border); border-radius: 6px;
