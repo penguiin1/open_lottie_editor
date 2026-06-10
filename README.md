@@ -92,3 +92,7 @@ src/
 - gifenc
 
 No backend, no telemetry, and no paid export gate.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
