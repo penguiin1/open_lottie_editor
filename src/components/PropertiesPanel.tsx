@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useStore, type BezierHandles } from '../store/useStore'
+import { layersFor, useStore, type BezierHandles, type MaskMode } from '../store/useStore'
 import { getValue, hasKeyframeAt, isAnimated, keyframeTimes } from '../lottie/props'
 import { EASINGS, EASING_NAMES } from '../lottie/easing'
 import { FONTS, getTextStyle } from '../lottie/text'
@@ -88,8 +88,10 @@ export default function PropertiesPanel() {
   // click on a handle must not wipe the redo stack.
   const curvePending = useRef(false)
   const [curveKey, setCurveKey] = useState<TransformKey | null>(null)
+  const compId = useStore((s) => s.compId)
+  const activeLayers = layersFor(doc, compId)
 
-  const layer = doc.layers.find((l) => l.ind === selectedInd)
+  const layer = activeLayers.find((l) => l.ind === selectedInd)
 
   if (!layer) {
     return (
@@ -138,6 +140,13 @@ export default function PropertiesPanel() {
   const strokeWidth = stroke?.w ? getValue(stroke.w, currentFrame)[0] : null
   const textStyle = layer.ty === 5 ? getTextStyle(layer) : null
   const s0: any = layer.shapes?.[0]
+  const tmIdx =
+    layer.ty === 4 && Array.isArray(layer.shapes)
+      ? layer.shapes.findIndex((it: any) => it?.ty === 'tm')
+      : -1
+  const trim: any = tmIdx >= 0 ? layer.shapes![tmIdx] : null
+  const layerIdx = activeLayers.findIndex((l) => l.ind === ind)
+  const masks: any[] = Array.isArray(layer.masksProperties) ? layer.masksProperties : []
 
   const stopColorChange = (si: number, hex: string) => {
     if (!pinfo) return
@@ -600,6 +609,191 @@ export default function PropertiesPanel() {
                   min={1}
                   onCommit={(n) => store().setShapeValue(ind, [0, 'ir', 'k'], n)}
                 />
+              </div>
+            )}
+          </section>
+        </>
+      )}
+
+      {layer.ty === 4 && Array.isArray(layer.shapes) && (
+        <>
+          <div className="panel-title">Trim Paths · frame {Math.round(currentFrame)}</div>
+          <section>
+            {!trim && (
+              <div className="prop-row">
+                <label className="k" style={{ marginLeft: 28 }}>
+                  Trim
+                </label>
+                <button onClick={() => store().addTrim(ind)}>+ Add trim paths</button>
+              </div>
+            )}
+            {trim &&
+              (
+                [
+                  ['s', 'Start %', 0, 100],
+                  ['e', 'End %', 0, 100],
+                  ['o', 'Offset °', undefined, undefined],
+                ] as const
+              ).map(([p, label, min, max]) => {
+                const prop = trim[p]
+                if (!prop || typeof prop !== 'object') return null
+                const path = ['shapes', tmIdx, p]
+                const animated = isAnimated(prop)
+                const onFrame = hasKeyframeAt(prop, currentFrame)
+                const v = getValue(prop, currentFrame)[0] ?? 0
+                return (
+                  <div key={p}>
+                    <div className="prop-row">
+                      <button
+                        className={`kf-btn${animated ? ' animated' : ''}${onFrame ? ' on' : ''}`}
+                        title={
+                          onFrame
+                            ? 'Remove keyframe at this frame'
+                            : animated
+                              ? 'Add keyframe at this frame'
+                              : 'Start animating (adds a keyframe)'
+                        }
+                        onClick={() => store().togglePathKeyframe(ind, path)}
+                      >
+                        {onFrame ? '◆' : '◇'}
+                      </button>
+                      <label className="k">{label}</label>
+                      <NumberField
+                        value={round1(v)}
+                        min={min}
+                        max={max}
+                        onCommit={(n) => store().setPathValue(ind, path, [n])}
+                      />
+                    </div>
+                    {animated && (
+                      <div className="row-sub">
+                        <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>
+                          {keyframeTimes(prop).length} keys
+                        </span>
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            if (e.target.value)
+                              store().setPathEasing(ind, path, e.target.value as EasingName)
+                            e.target.value = ''
+                          }}
+                        >
+                          <option value="" disabled>
+                            easing…
+                          </option>
+                          {EASING_NAMES.map((n) => (
+                            <option key={n} value={n}>
+                              {n}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          className="link-btn"
+                          onClick={() => store().removePathAnimation(ind, path)}
+                        >
+                          remove animation
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            {trim && (
+              <div className="prop-row">
+                <label className="k" style={{ marginLeft: 28 }} />
+                <button className="link-btn" onClick={() => store().removeTrim(ind)}>
+                  remove trim paths
+                </button>
+              </div>
+            )}
+          </section>
+        </>
+      )}
+
+      {layer.ty === 0 && typeof layer.refId === 'string' && (
+        <>
+          <div className="panel-title">Precomp</div>
+          <section>
+            <div className="prop-row">
+              <label className="k" style={{ marginLeft: 28 }}>
+                Contents
+              </label>
+              <button onClick={() => store().enterComp(ind)}>⤵ Edit precomp</button>
+            </div>
+            <div className="hint" style={{ padding: '0 0 4px 28px' }}>
+              Edits apply to every layer referencing “{layer.refId}”.
+            </div>
+          </section>
+        </>
+      )}
+
+      <div className="panel-title">Masks</div>
+      <section>
+        {masks.map((m, mi) => (
+          <div className="prop-row" key={mi}>
+            <label className="k" style={{ marginLeft: 28 }}>
+              {m.nm || `Mask ${mi + 1}`}
+            </label>
+            <select
+              value={m.mode ?? 'a'}
+              onChange={(e) => store().setMaskMode(ind, mi, e.target.value as MaskMode)}
+            >
+              <option value="a">Add</option>
+              <option value="s">Subtract</option>
+              <option value="i">Intersect</option>
+              <option value="n">None</option>
+            </select>
+            <label
+              style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--text-dim)' }}
+            >
+              <input
+                type="checkbox"
+                checked={!!m.inv}
+                onChange={(e) => store().setMaskInv(ind, mi, e.target.checked)}
+              />
+              inv
+            </label>
+            <button className="link-btn" title="Remove mask" onClick={() => store().removeMask(ind, mi)}>
+              ×
+            </button>
+          </div>
+        ))}
+        <div className="prop-row">
+          <label className="k" style={{ marginLeft: 28 }} />
+          <button onClick={() => store().addMask(ind)}>+ Add mask</button>
+        </div>
+        {masks.length > 0 && (
+          <div className="hint" style={{ padding: '0 0 4px 28px' }}>
+            Drag the green dots on the canvas to edit the mask path.
+          </div>
+        )}
+      </section>
+
+      {layerIdx > 0 && (
+        <>
+          <div className="panel-title">Matte</div>
+          <section>
+            <div className="prop-row">
+              <label className="k" style={{ marginLeft: 28 }}>
+                Matte
+              </label>
+              <select
+                className="grow"
+                value={layer.tt ?? 0}
+                onChange={(e) =>
+                  store().setMatte(ind, Number(e.target.value) as 0 | 1 | 2 | 3 | 4)
+                }
+              >
+                <option value={0}>None</option>
+                <option value={1}>Alpha (layer above)</option>
+                <option value={2}>Alpha inverted</option>
+                <option value={3}>Luma</option>
+                <option value={4}>Luma inverted</option>
+              </select>
+            </div>
+            {(layer.tt ?? 0) !== 0 && (
+              <div className="hint" style={{ padding: '0 0 4px 28px' }}>
+                The layer above is used as the matte and is hidden from normal render.
               </div>
             )}
           </section>

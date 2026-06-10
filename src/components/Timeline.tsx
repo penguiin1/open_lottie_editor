@@ -1,8 +1,30 @@
 import { useRef } from 'react'
-import { useStore } from '../store/useStore'
+import { getAtPath, layersFor, useStore } from '../store/useStore'
 import { hasKeyframeAt, isAnimated, keyframeTimes } from '../lottie/props'
 import { EASING_NAMES } from '../lottie/easing'
 import type { EasingName, LottieLayer, TransformKey } from '../types/lottie'
+
+/** One draggable keyframe row under the selected layer (transform or trim). */
+interface SubEntry {
+  id: string
+  label: string
+  times: number[]
+  move: (from: number, to: number) => void
+  freshProp: () => any
+  toggleAtCurrent: () => void
+}
+
+const TRIM_LABELS: ['s' | 'e' | 'o', string][] = [
+  ['s', 'Trim start'],
+  ['e', 'Trim end'],
+  ['o', 'Trim offset'],
+]
+
+function trimIndex(layer: LottieLayer): number {
+  return Array.isArray(layer.shapes)
+    ? layer.shapes.findIndex((it: any) => it?.ty === 'tm')
+    : -1
+}
 
 const TKEYS: { key: TransformKey; label: string }[] = [
   { key: 'p', label: 'Position' },
@@ -24,7 +46,9 @@ export default function Timeline() {
   const playing = useStore((s) => s.playing)
   const selectedInd = useStore((s) => s.selectedInd)
   const defaultEasing = useStore((s) => s.defaultEasing)
+  const compId = useStore((s) => s.compId)
   const rulerRef = useRef<HTMLDivElement>(null)
+  const activeLayers = layersFor(doc, compId)
 
   const span = Math.max(1, doc.op - doc.ip)
   const pct = (t: number) => `${((t - doc.ip) / span) * 100}%`
@@ -72,7 +96,7 @@ export default function Timeline() {
     e: React.PointerEvent,
     layer: LottieLayer,
     t0: number,
-    key: TransformKey,
+    entry: SubEntry,
   ) => {
     e.stopPropagation()
     e.preventDefault()
@@ -94,11 +118,10 @@ export default function Timeline() {
         snapshotted = true
         useStore.getState().beginEdit()
       }
-      useStore.getState().moveKeyframe(layer.ind, key, cur, clamped, false)
+      entry.move(cur, clamped)
       // The move is refused when another keyframe occupies the target frame;
       // only advance our cursor if the keyframe actually left `cur`.
-      const now = useStore.getState().doc.layers.find((l) => l.ind === layer.ind)
-      if (now && !hasKeyframeAt(now.ks?.[key], cur)) {
+      if (!hasKeyframeAt(entry.freshProp(), cur)) {
         cur = clamped
         useStore.getState().setFrame(clamped)
       }
@@ -108,25 +131,65 @@ export default function Timeline() {
       window.removeEventListener('pointerup', up)
       if (!moved) {
         useStore.getState().setFrame(t0)
-        if (ev.altKey) useStore.getState().toggleKeyframe(layer.ind, key)
+        if (ev.altKey) entry.toggleAtCurrent()
       }
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
   }
 
+  const buildSub = (layer: LottieLayer): SubEntry[] => {
+    if (layer.ind !== selectedInd) return []
+    const entries: SubEntry[] = []
+    for (const { key, label } of TKEYS) {
+      const prop = layer.ks?.[key]
+      if (!isAnimated(prop)) continue
+      entries.push({
+        id: key,
+        label,
+        times: keyframeTimes(prop),
+        move: (from, to) => useStore.getState().moveKeyframe(layer.ind, key, from, to, false),
+        freshProp: () => {
+          const st = useStore.getState()
+          return layersFor(st.doc, st.compId).find((l) => l.ind === layer.ind)?.ks?.[key]
+        },
+        toggleAtCurrent: () => useStore.getState().toggleKeyframe(layer.ind, key),
+      })
+    }
+    const ti = trimIndex(layer)
+    if (ti >= 0) {
+      for (const [p, label] of TRIM_LABELS) {
+        const prop = (layer.shapes as any[])[ti]?.[p]
+        if (!isAnimated(prop)) continue
+        const path = ['shapes', ti, p]
+        entries.push({
+          id: `tm-${p}`,
+          label,
+          times: keyframeTimes(prop),
+          move: (from, to) =>
+            useStore.getState().movePathKeyframe(layer.ind, path, from, to, false),
+          freshProp: () => {
+            const st = useStore.getState()
+            return getAtPath(
+              layersFor(st.doc, st.compId).find((l) => l.ind === layer.ind),
+              path,
+            )
+          },
+          toggleAtCurrent: () => useStore.getState().togglePathKeyframe(layer.ind, path),
+        })
+      }
+    }
+    return entries
+  }
+
   const ticks: number[] = []
   const step = pickTickStep(span)
   for (let t = doc.ip; t <= doc.op; t += step) ticks.push(t)
 
-  const rows: { layer: LottieLayer; sub: { key: TransformKey; label: string }[] }[] =
-    doc.layers.map((layer) => ({
-      layer,
-      sub:
-        layer.ind === selectedInd
-          ? TKEYS.filter(({ key }) => isAnimated(layer.ks?.[key]))
-          : [],
-    }))
+  const rows: { layer: LottieLayer; sub: SubEntry[] }[] = activeLayers.map((layer) => ({
+    layer,
+    sub: buildSub(layer),
+  }))
 
   return (
     <div className="timeline">
@@ -167,9 +230,9 @@ export default function Timeline() {
               >
                 {layer.nm}
               </div>
-              {sub.map(({ key, label }) => (
-                <div key={key} className="tl-name-row subrow selected">
-                  {label}
+              {sub.map((entry) => (
+                <div key={entry.id} className="tl-name-row subrow selected">
+                  {entry.label}
                 </div>
               ))}
             </div>
@@ -186,10 +249,15 @@ export default function Timeline() {
           </div>
 
           {rows.map(({ layer, sub }) => {
+            const ti = trimIndex(layer)
+            const trimTimes =
+              ti >= 0
+                ? TRIM_LABELS.flatMap(([p]) => keyframeTimes((layer.shapes as any[])[ti]?.[p]))
+                : []
             const aggregate = Array.from(
               new Set(
-                TKEYS.flatMap(({ key }) => keyframeTimes(layer.ks?.[key])).map((t) =>
-                  Math.round(t),
+                [...TKEYS.flatMap(({ key }) => keyframeTimes(layer.ks?.[key])), ...trimTimes].map(
+                  (t) => Math.round(t),
                 ),
               ),
             )
@@ -214,15 +282,15 @@ export default function Timeline() {
                     />
                   ))}
                 </div>
-                {sub.map(({ key }) => (
-                  <div key={key} className="tl-track-row subrow">
-                    {keyframeTimes(layer.ks?.[key]).map((t) => (
+                {sub.map((entry) => (
+                  <div key={entry.id} className="tl-track-row subrow">
+                    {entry.times.map((t) => (
                       <div
                         key={t}
                         className="kf-diamond"
                         style={{ left: pct(t) }}
                         title={`frame ${Math.round(t)} · drag to retime · alt+click to delete`}
-                        onPointerDown={(e) => onDiamondDown(e, layer, Math.round(t), key)}
+                        onPointerDown={(e) => onDiamondDown(e, layer, Math.round(t), entry)}
                       />
                     ))}
                   </div>

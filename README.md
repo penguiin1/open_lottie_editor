@@ -1,55 +1,94 @@
 # OpenLottie Studio
 
-A free, open, fully client-side Lottie animation editor.
+OpenLottie Studio is a free, open, fully client-side Lottie animation editor.
+It runs in the browser, exports without watermarks, and does not require an
+account or backend service.
 
-**✓ Unlimited exports · ✓ No watermark · ✓ No account · ✓ Your files never leave your browser**
-
-Every major Lottie tool now paywalls the export button: Rive moved *all* exports to paid plans
-(Oct 2025), LottieFiles caps free Creator exports at five, Lottielab embeds a watermark layer
-inside free exports. This editor is the opposite: everything runs locally in your browser and
-everything you make is yours.
+Your files stay local: importing, editing, previewing, and exporting all happen
+inside the browser.
 
 ## Features
 
-- **Shape layers** — rectangles, ellipses, stars with fill color, size, corner radius controls
-- **Pen tool** — draw free bezier paths on the canvas (click for corners, drag for curves,
-  close or leave open), then edit them: drag vertices, drag tangent handles (Alt to break
-  symmetry), Alt+drag a corner to make it smooth, Alt+click to delete a point, click a
-  segment midpoint to insert one
-- **Text layers** — editable content, web-safe fonts, size, color, alignment, line height, tracking
-- **Fills** — solid colors and linear/radial gradients with editable stops and angle
-- **Keyframe animation** — position, scale, rotation, opacity with easing presets and a
-  draggable cubic-bezier curve editor
-- **Timeline** — scrubbing, playback, per-property keyframe rows, drag diamonds to retime,
-  alt+click to delete keys
-- **Canvas editing** — drag the selected layer directly on the canvas
-- **Strokes** — add/remove strokes with color and width on any shape layer
-- **Import** — Lottie JSON and dotLottie (`.lottie`) files, including bundled images
-- **Export** — Lottie JSON, dotLottie, GIF, and WebM video (all rendered in the browser)
-- **Undo/redo**, sample templates, layer rename/duplicate/reorder
+- Shape layers: rectangles, ellipses, stars, custom pen paths, fills, strokes,
+  size controls, corner radius, and star options.
+- Pen and path editing: click to draw, double-click or press Enter to finish,
+  drag vertices, drag Bezier handles, insert midpoint vertices, and delete
+  points.
+- Text layers: edit copy, font, size, color, alignment, line height, and
+  tracking.
+- Paint controls: solid fills, linear gradients, radial gradients, editable
+  stops, gradient angle, stroke color, and stroke width.
+- Animation tools: transform keyframes for position, scale, rotation, and
+  opacity with easing presets and a cubic-Bezier easing editor.
+- Trim paths: add animatable start, end, and offset values for line-drawing
+  effects.
+- Masks: add layer masks, edit mask paths on the canvas, set add/subtract/
+  intersect/none modes, and invert masks.
+- Track mattes: use the layer above as an alpha, alpha-inverted, luma, or
+  luma-inverted matte.
+- Precomps: step into precomp layers with breadcrumb navigation and edit their
+  contents directly.
+- Timeline: scrub, play, retime layer bars, view aggregate keyframes, expand
+  selected properties, drag keyframe diamonds, and Alt-click to delete keys.
+- Import: open Lottie JSON and dotLottie files, including bundled image assets.
+- Export: save Lottie JSON, dotLottie, GIF, and WebM video from the browser.
+- Workflow: undo/redo, sample templates, layer rename, duplicate, reorder, and
+  delete.
 
-## Run it
+## Getting Started
 
 ```bash
 npm install
-npm run dev      # http://localhost:5180
-npm run build    # production build in dist/
+npm run dev
 ```
 
-`dist/` is fully static — host it anywhere (GitHub Pages, Netlify, a USB stick).
+The dev server is configured by Vite. By default it prints a local URL such as
+`http://localhost:5173`.
+
+## Build
+
+```bash
+npm run build
+```
+
+The production build is written to `dist/`. It is a static site and can be
+hosted on GitHub Pages, Netlify, Vercel, or any static file host.
 
 ## Shortcuts
 
-| Key | Action |
+| Shortcut | Action |
 | --- | --- |
-| Space | Play / pause |
-| ← / → (+Shift) | Step 1 (10) frames |
-| Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
-| Delete | Delete selected layer |
-| Double-click layer | Rename |
-| Alt+click keyframe | Delete keyframe |
+| Space | Play or pause |
+| Left / Right | Step one frame |
+| Shift + Left / Right | Step ten frames |
+| Ctrl + Z | Undo |
+| Ctrl + Shift + Z / Ctrl + Y | Redo |
+| Delete / Backspace | Delete selected layer |
+| Double-click layer | Rename layer |
+| Alt-click keyframe | Delete keyframe |
+| Enter in pen mode | Finish open path |
+| Esc in pen mode | Cancel path |
+
+## Project Structure
+
+```text
+src/
+  components/   React UI for the editor panels, canvas, timeline, and export
+  io/           Lottie, dotLottie, GIF, WebM, and download helpers
+  lottie/       Lottie document, path, paint, text, easing, and prop utilities
+  samples/      Built-in sample animations
+  store/        Zustand editor state, history, and editing actions
+  types/        Lottie type definitions
+```
 
 ## Stack
 
-Vite · React 18 · TypeScript · zustand + immer (state/undo) · lottie-web (preview & GIF
-rasterizing) · fflate (dotLottie zip) · gifenc (GIF encoding). No backend, no telemetry.
+- Vite
+- React 18
+- TypeScript
+- Zustand and Immer
+- lottie-web
+- fflate
+- gifenc
+
+No backend, no telemetry, and no paid export gate.

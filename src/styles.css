@@ -263,6 +263,23 @@ button.tool-active {
   pointer-events: auto; cursor: copy;
 }
 .midpoint-marker:hover { fill: var(--ok); stroke: #fff; }
+.path-vertex.mask { fill: #34d399; }
+.path-handle.mask { fill: #34d399; }
+.path-handle-line.mask { stroke: #34d399; }
+.midpoint-marker.mask { stroke: #34d399; }
+
+.crumbs {
+  position: absolute; top: 10px; left: 12px; z-index: 10;
+  display: flex; align-items: center; gap: 4px;
+  background: rgba(20, 20, 28, .85); border: 1px solid var(--border);
+  border-radius: 8px; padding: 4px 8px;
+}
+.crumbs button {
+  background: none; border: none; padding: 2px 4px; font-size: 12px;
+  color: var(--accent-2);
+}
+.crumbs button:disabled { color: var(--text); opacity: 1; font-weight: 600; }
+.crumbs .crumb-sep { color: var(--text-dim); margin: 0 2px; }
 .props textarea {
   font: inherit; color: var(--text); background: var(--panel-2);
   border: 1px solid var(--border); border-radius: 6px;

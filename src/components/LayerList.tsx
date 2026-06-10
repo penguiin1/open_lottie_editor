@@ -1,8 +1,12 @@
 import { useState } from 'react'
-import { useStore } from '../store/useStore'
+import { layersFor, useStore } from '../store/useStore'
 
 export default function LayerList() {
-  const layers = useStore((s) => s.doc.layers)
+  const doc = useStore((s) => s.doc)
+  const compId = useStore((s) => s.compId)
+  const compStack = useStore((s) => s.compStack)
+  const enterComp = useStore((s) => s.enterComp)
+  const layers = layersFor(doc, compId)
   const selectedInd = useStore((s) => s.selectedInd)
   const selectLayer = useStore((s) => s.selectLayer)
   const deleteLayer = useStore((s) => s.deleteLayer)
@@ -19,7 +23,9 @@ export default function LayerList() {
 
   return (
     <div className="layers">
-      <div className="panel-title">Layers</div>
+      <div className="panel-title">
+        Layers{compStack.length > 0 ? ` · ${compStack[compStack.length - 1].name}` : ''}
+      </div>
       <div className="layer-rows">
         {layers.length === 0 && (
           <div className="empty">
@@ -52,8 +58,21 @@ export default function LayerList() {
               />
             ) : (
               <span className="name" title={l.nm}>
+                {l.ty === 0 ? '🗀 ' : ''}
                 {l.nm}
               </span>
+            )}
+            {l.ty === 0 && typeof l.refId === 'string' && (
+              <button
+                className="mini"
+                title="Edit precomp contents"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  enterComp(l.ind)
+                }}
+              >
+                ⤵
+              </button>
             )}
             <button
               className="mini"

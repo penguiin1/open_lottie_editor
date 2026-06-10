@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import lottie, { type AnimationItem } from 'lottie-web'
-import { useStore } from '../store/useStore'
+import { layersFor, useStore } from '../store/useStore'
 import { getValue } from '../lottie/props'
-import { getPathGeometry, type PenPoint } from '../lottie/path'
+import { getMaskGeometry, getPathGeometry, type PathGeometry, type PenPoint } from '../lottie/path'
 
 function draftPathD(points: PenPoint[], scale: number): string {
   if (points.length === 0) return ''
@@ -29,6 +29,8 @@ export default function CanvasStage() {
   const currentFrame = useStore((s) => s.currentFrame)
   const selectedInd = useStore((s) => s.selectedInd)
   const tool = useStore((s) => s.tool)
+  const compId = useStore((s) => s.compId)
+  const compStack = useStore((s) => s.compStack)
   const [stageSize, setStageSize] = useState({ w: 512, h: 512 })
   const [dragging, setDragging] = useState(false)
   const [draft, setDraft] = useState<PenPoint[]>([])
@@ -40,10 +42,22 @@ export default function CanvasStage() {
     draftRef.current = draft
   }, [draft])
 
-  const scale = stageSize.w / doc.w
-  const selLayer = doc.layers.find((l) => l.ind === selectedInd)
+  const top = compStack[compStack.length - 1]
+  const compW = top?.w ?? doc.w
+  const compH = top?.h ?? doc.h
+  const layers = layersFor(doc, compId)
+  const scale = stageSize.w / compW
+  const selLayer = layers.find((l) => l.ind === selectedInd)
   const selName = selLayer?.nm
   const pathGeo = tool === 'select' && selLayer ? getPathGeometry(selLayer) : null
+  const geos: { geo: PathGeometry; mi: number | null }[] = []
+  if (pathGeo) geos.push({ geo: pathGeo, mi: null })
+  if (tool === 'select' && selLayer) {
+    ;(selLayer.masksProperties ?? []).forEach((_: any, i: number) => {
+      const g = getMaskGeometry(selLayer, i)
+      if (g) geos.push({ geo: g, mi: i })
+    })
+  }
 
   // Fit the stage to the available area, preserving the comp's aspect ratio.
   useEffect(() => {
@@ -53,14 +67,14 @@ export default function CanvasStage() {
       const pad = 56
       const aw = Math.max(80, el.clientWidth - pad)
       const ah = Math.max(80, el.clientHeight - pad)
-      const sc = Math.min(aw / doc.w, ah / doc.h, 1.5)
-      setStageSize({ w: Math.round(doc.w * sc), h: Math.round(doc.h * sc) })
+      const sc = Math.min(aw / compW, ah / compH, 1.5)
+      setStageSize({ w: Math.round(compW * sc), h: Math.round(compH * sc) })
     }
     fit()
     const ro = new ResizeObserver(fit)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [doc.w, doc.h])
+  }, [compW, compH])
 
   // (Re)load the lottie-web instance whenever the document changes.
   // Debounced slightly so canvas drags don't reload on every pointermove.
@@ -70,13 +84,17 @@ export default function CanvasStage() {
       if (!host) return
       animRef.current?.destroy()
       animRef.current = null
+      // Inside a precomp, preview just that comp's layers at the comp's size.
+      const renderDoc = compId
+        ? { ...doc, w: compW, h: compH, layers: layersFor(doc, compId) }
+        : doc
       const anim = lottie.loadAnimation({
         container: host,
         renderer: 'svg',
         loop: true,
         autoplay: false,
         // lottie-web mutates animationData, so hand it a deep copy
-        animationData: JSON.parse(JSON.stringify(doc)),
+        animationData: JSON.parse(JSON.stringify(renderDoc)),
       })
       anim.addEventListener('enterFrame', () => {
         const st = useStore.getState()
@@ -88,7 +106,7 @@ export default function CanvasStage() {
       animRef.current = anim
     }, 30)
     return () => window.clearTimeout(id)
-  }, [doc])
+  }, [doc, compId, compW, compH])
 
   useEffect(() => () => animRef.current?.destroy(), [])
 
@@ -187,7 +205,7 @@ export default function CanvasStage() {
     const st = useStore.getState()
     if (st.selectedInd == null) return
     const ind = st.selectedInd
-    const layer = st.doc.layers.find((l) => l.ind === ind)
+    const layer = layersFor(st.doc, st.compId).find((l) => l.ind === ind)
     if (!layer || !layer.ks?.p) return
     e.preventDefault()
     st.setPlaying(false)
@@ -221,7 +239,7 @@ export default function CanvasStage() {
 
   /** Plain drag moves the vertex; Alt+drag pulls out symmetric tangents
    *  (corner → smooth); Alt+click (no movement) deletes the vertex. */
-  const onVertexDown = (e: React.PointerEvent, vi: number) => {
+  const onVertexDown = (e: React.PointerEvent, vi: number, mi: number | null) => {
     e.stopPropagation()
     e.preventDefault()
     const st = useStore.getState()
@@ -242,13 +260,22 @@ export default function CanvasStage() {
         useStore.getState().beginEdit()
       }
       const pt = toComp(ev, stage)
-      if (alt) useStore.getState().movePathTangent(ind, vi, 'out', pt.x, pt.y, true, false)
-      else useStore.getState().movePathVertex(ind, vi, pt.x, pt.y, false)
+      const st2 = useStore.getState()
+      if (alt) {
+        if (mi == null) st2.movePathTangent(ind, vi, 'out', pt.x, pt.y, true, false)
+        else st2.moveMaskTangentAction(ind, mi, vi, 'out', pt.x, pt.y, true)
+      } else {
+        if (mi == null) st2.movePathVertex(ind, vi, pt.x, pt.y, false)
+        else st2.moveMaskVertexAction(ind, mi, vi, pt.x, pt.y)
+      }
     }
     const up = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
-      if (alt && !moved) useStore.getState().deletePathVertex(ind, vi)
+      if (alt && !moved) {
+        if (mi == null) useStore.getState().deletePathVertex(ind, vi)
+        else useStore.getState().deleteMaskVertexAction(ind, mi, vi)
+      }
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
@@ -256,7 +283,12 @@ export default function CanvasStage() {
 
   /** Drag a tangent handle. Mirrored (smooth) by default; hold Alt while
    *  dragging to move this handle independently. */
-  const onHandleDown = (e: React.PointerEvent, vi: number, which: 'in' | 'out') => {
+  const onHandleDown = (
+    e: React.PointerEvent,
+    vi: number,
+    which: 'in' | 'out',
+    mi: number | null,
+  ) => {
     e.stopPropagation()
     e.preventDefault()
     const st = useStore.getState()
@@ -271,7 +303,8 @@ export default function CanvasStage() {
         useStore.getState().beginEdit()
       }
       const pt = toComp(ev, stage)
-      useStore.getState().movePathTangent(ind, vi, which, pt.x, pt.y, !ev.altKey, false)
+      if (mi == null) useStore.getState().movePathTangent(ind, vi, which, pt.x, pt.y, !ev.altKey, false)
+      else useStore.getState().moveMaskTangentAction(ind, mi, vi, which, pt.x, pt.y, !ev.altKey)
     }
     const up = () => {
       window.removeEventListener('pointermove', move)
@@ -281,12 +314,19 @@ export default function CanvasStage() {
     window.addEventListener('pointerup', up)
   }
 
-  const onMidDown = (e: React.PointerEvent, segIndex: number, mx: number, my: number) => {
+  const onMidDown = (
+    e: React.PointerEvent,
+    segIndex: number,
+    mx: number,
+    my: number,
+    mi: number | null,
+  ) => {
     e.stopPropagation()
     e.preventDefault()
     const st = useStore.getState()
     if (st.selectedInd == null) return
-    st.insertPathVertex(st.selectedInd, segIndex, mx, my)
+    if (mi == null) st.insertPathVertex(st.selectedInd, segIndex, mx, my)
+    else st.insertMaskVertexAction(st.selectedInd, mi, segIndex, mx, my)
   }
 
   const penHint =
@@ -296,6 +336,22 @@ export default function CanvasStage() {
 
   return (
     <div className="canvas-wrap" ref={wrapRef}>
+      {compStack.length > 0 && (
+        <div className="crumbs">
+          <button onClick={() => useStore.getState().exitComp(0)}>Main</button>
+          {compStack.map((c, i) => (
+            <span key={i}>
+              <span className="crumb-sep">›</span>
+              <button
+                disabled={i === compStack.length - 1}
+                onClick={() => useStore.getState().exitComp(i + 1)}
+              >
+                {c.name}
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
       <div className="stage" style={{ width: stageSize.w, height: stageSize.h }}>
         <div className="lottie-host" ref={hostRef} style={{ width: '100%', height: '100%' }} />
 
@@ -317,7 +373,7 @@ export default function CanvasStage() {
           }
         />
 
-        {(tool === 'pen' || pathGeo) && (
+        {(tool === 'pen' || geos.length > 0) && (
           <svg className="editing-overlay" width={stageSize.w} height={stageSize.h}>
             {tool === 'pen' && draft.length > 0 && (
               <>
@@ -342,71 +398,73 @@ export default function CanvasStage() {
                 ))}
               </>
             )}
-            {pathGeo && (
-              <>
-                {pathGeo.verts.map((v, i) => {
-                  const j = (i + 1) % pathGeo.verts.length
-                  if (!pathGeo.closed && j === 0) return null
-                  const w = pathGeo.verts[j]
-                  const mx = (v.x + w.x) / 2
-                  const my = (v.y + w.y) / 2
-                  return (
-                    <g key={`mid${i}`}>
+            {geos.map(({ geo, mi }) => {
+              const mcls = mi != null ? ' mask' : ''
+              return (
+                <g key={mi == null ? 'shape' : `mask${mi}`}>
+                  {geo.verts.map((v, i) => {
+                    const j = (i + 1) % geo.verts.length
+                    if (!geo.closed && j === 0) return null
+                    const w = geo.verts[j]
+                    const mx = (v.x + w.x) / 2
+                    const my = (v.y + w.y) / 2
+                    return (
                       <circle
+                        key={`mid${i}`}
                         cx={mx * scale}
                         cy={my * scale}
                         r={4}
-                        className="midpoint-marker"
-                        onPointerDown={(e) => onMidDown(e, i, mx, my)}
+                        className={`midpoint-marker${mcls}`}
+                        onPointerDown={(e) => onMidDown(e, i, mx, my, mi)}
                       >
                         <title>Insert point</title>
                       </circle>
-                    </g>
-                  )
-                })}
-                {pathGeo.verts.map((v, i) => {
-                  const handles: { which: 'in' | 'out'; h: { x: number; y: number } }[] = []
-                  if (Math.hypot(pathGeo.ins[i].x - v.x, pathGeo.ins[i].y - v.y) > 0.5) {
-                    handles.push({ which: 'in', h: pathGeo.ins[i] })
-                  }
-                  if (Math.hypot(pathGeo.outs[i].x - v.x, pathGeo.outs[i].y - v.y) > 0.5) {
-                    handles.push({ which: 'out', h: pathGeo.outs[i] })
-                  }
-                  return (
-                    <g key={`h${i}`}>
-                      {handles.map(({ which, h }) => (
-                        <g key={which}>
-                          <line
-                            x1={v.x * scale}
-                            y1={v.y * scale}
-                            x2={h.x * scale}
-                            y2={h.y * scale}
-                            className="path-handle-line"
-                          />
-                          <circle
-                            cx={h.x * scale}
-                            cy={h.y * scale}
-                            r={3.5}
-                            className="path-handle"
-                            onPointerDown={(e) => onHandleDown(e, i, which)}
-                          />
-                        </g>
-                      ))}
-                    </g>
-                  )
-                })}
-                {pathGeo.verts.map((v, i) => (
-                  <circle
-                    key={`v${i}`}
-                    cx={v.x * scale}
-                    cy={v.y * scale}
-                    r={5}
-                    className="path-vertex"
-                    onPointerDown={(e) => onVertexDown(e, i)}
-                  />
-                ))}
-              </>
-            )}
+                    )
+                  })}
+                  {geo.verts.map((v, i) => {
+                    const handles: { which: 'in' | 'out'; h: { x: number; y: number } }[] = []
+                    if (Math.hypot(geo.ins[i].x - v.x, geo.ins[i].y - v.y) > 0.5) {
+                      handles.push({ which: 'in', h: geo.ins[i] })
+                    }
+                    if (Math.hypot(geo.outs[i].x - v.x, geo.outs[i].y - v.y) > 0.5) {
+                      handles.push({ which: 'out', h: geo.outs[i] })
+                    }
+                    return (
+                      <g key={`h${i}`}>
+                        {handles.map(({ which, h }) => (
+                          <g key={which}>
+                            <line
+                              x1={v.x * scale}
+                              y1={v.y * scale}
+                              x2={h.x * scale}
+                              y2={h.y * scale}
+                              className={`path-handle-line${mcls}`}
+                            />
+                            <circle
+                              cx={h.x * scale}
+                              cy={h.y * scale}
+                              r={3.5}
+                              className={`path-handle${mcls}`}
+                              onPointerDown={(e) => onHandleDown(e, i, which, mi)}
+                            />
+                          </g>
+                        ))}
+                      </g>
+                    )
+                  })}
+                  {geo.verts.map((v, i) => (
+                    <circle
+                      key={`v${i}`}
+                      cx={v.x * scale}
+                      cy={v.y * scale}
+                      r={5}
+                      className={`path-vertex${mcls}`}
+                      onPointerDown={(e) => onVertexDown(e, i, mi)}
+                    />
+                  ))}
+                </g>
+              )
+            })}
           </svg>
         )}
 

@@ -102,21 +102,14 @@ export function createPenLayer(
   }
 }
 
-/** Guards shared by getPathVertices/moveVertex: first shape is a static path
- *  and the layer position is static + joint. Returns the pieces or null. */
-function staticPathParts(
-  layer: LottieLayer,
-): { k: { i: number[][]; o: number[][]; v: number[][]; c: boolean }; px: number; py: number } | null {
-  const shape = layer.shapes?.[0]
-  if (!shape || shape.ty !== 'sh') return null
-  const ks = shape.ks
-  if (!ks || ks.a !== 0) return null
-  const k = ks.k
-  if (!k || !Array.isArray(k.v)) return null
+type PathK = { i: number[][]; o: number[][]; v: number[][]; c: boolean }
+
+/** Static layer offset, or null unless the transform is identity beyond
+ *  translation — overlay math can't represent rotation/scale/anchor, so
+ *  editing is disabled for transformed layers to avoid corrupting paths. */
+function staticOffset(layer: LottieLayer): { px: number; py: number } | null {
   const p = layer.ks?.p
   if (!p || p.a === 1 || (p as any).s === true) return null
-  // Vertex overlay math assumes an identity transform beyond translation —
-  // bail out for rotated/scaled/anchored layers so drags can't corrupt paths.
   const t = layer.ks
   const rv = t.r && t.r.a !== 1 ? toArray(t.r.k)[0] : NaN
   const sv = t.s && t.s.a !== 1 ? toArray(t.s.k) : [NaN]
@@ -125,7 +118,35 @@ function staticPathParts(
   if (Math.round(sv[0] ?? NaN) !== 100 || Math.round(sv[1] ?? sv[0] ?? NaN) !== 100) return null
   if ((av[0] ?? NaN) !== 0 || (av[1] ?? 0) !== 0) return null
   const pos = toArray(p.k)
-  return { k, px: pos[0] ?? 0, py: pos[1] ?? 0 }
+  return { px: pos[0] ?? 0, py: pos[1] ?? 0 }
+}
+
+/** Guards shared by getPathVertices/moveVertex: first shape is a static path
+ *  and the layer position is static + joint. Returns the pieces or null. */
+function staticPathParts(layer: LottieLayer): { k: PathK; px: number; py: number } | null {
+  const shape = layer.shapes?.[0]
+  if (!shape || shape.ty !== 'sh') return null
+  const ks = shape.ks
+  if (!ks || ks.a !== 0) return null
+  const k = ks.k
+  if (!k || !Array.isArray(k.v)) return null
+  const off = staticOffset(layer)
+  if (!off) return null
+  return { k, ...off }
+}
+
+/** Same guards for a mask path (masksProperties[mi].pt). */
+function staticMaskParts(
+  layer: LottieLayer,
+  mi: number,
+): { k: PathK; px: number; py: number } | null {
+  const mask = layer.masksProperties?.[mi]
+  if (!mask?.pt || mask.pt.a !== 0) return null
+  const k = mask.pt.k
+  if (!k || !Array.isArray(k.v)) return null
+  const off = staticOffset(layer)
+  if (!off) return null
+  return { k, ...off }
 }
 
 /** Path vertices in composition coordinates (vertex + static layer position),
@@ -158,11 +179,7 @@ export interface PathGeometry {
   closed: boolean
 }
 
-/** Full editable geometry in composition coordinates, or null if the layer
- *  fails the static-path guards. */
-export function getPathGeometry(layer: LottieLayer): PathGeometry | null {
-  const parts = staticPathParts(layer)
-  if (!parts) return null
+function geometryOf(parts: { k: PathK; px: number; py: number }): PathGeometry {
   const { k, px, py } = parts
   const verts = k.v.map((v) => ({ x: (v?.[0] ?? 0) + px, y: (v?.[1] ?? 0) + py }))
   const ins = verts.map((v, i) => ({
@@ -174,6 +191,19 @@ export function getPathGeometry(layer: LottieLayer): PathGeometry | null {
     y: v.y + (k.o?.[i]?.[1] ?? 0),
   }))
   return { verts, ins, outs, closed: !!k.c }
+}
+
+/** Full editable geometry in composition coordinates, or null if the layer
+ *  fails the static-path guards. */
+export function getPathGeometry(layer: LottieLayer): PathGeometry | null {
+  const parts = staticPathParts(layer)
+  return parts ? geometryOf(parts) : null
+}
+
+/** Editable geometry of mask `mi`, in composition coordinates. */
+export function getMaskGeometry(layer: LottieLayer, mi: number): PathGeometry | null {
+  const parts = staticMaskParts(layer, mi)
+  return parts ? geometryOf(parts) : null
 }
 
 function ensureTangentArrays(k: { i: number[][]; o: number[][]; v: number[][] }): void {
@@ -193,7 +223,29 @@ export function moveTangent(
   y: number,
   mirror: boolean,
 ): boolean {
-  const parts = staticPathParts(layer)
+  return moveTangentCore(staticPathParts(layer), index, which, x, y, mirror)
+}
+
+export function moveMaskTangent(
+  layer: LottieLayer,
+  mi: number,
+  index: number,
+  which: 'in' | 'out',
+  x: number,
+  y: number,
+  mirror: boolean,
+): boolean {
+  return moveTangentCore(staticMaskParts(layer, mi), index, which, x, y, mirror)
+}
+
+function moveTangentCore(
+  parts: { k: PathK; px: number; py: number } | null,
+  index: number,
+  which: 'in' | 'out',
+  x: number,
+  y: number,
+  mirror: boolean,
+): boolean {
   if (!parts) return false
   const { k, px, py } = parts
   if (index < 0 || index >= k.v.length) return false
@@ -213,7 +265,25 @@ export function moveTangent(
 /** Insert a corner vertex after `segIndex` (the segment from vertex
  *  segIndex to the next one; for closed paths the last segment wraps). */
 export function insertVertex(layer: LottieLayer, segIndex: number, x: number, y: number): boolean {
-  const parts = staticPathParts(layer)
+  return insertVertexCore(staticPathParts(layer), segIndex, x, y)
+}
+
+export function insertMaskVertex(
+  layer: LottieLayer,
+  mi: number,
+  segIndex: number,
+  x: number,
+  y: number,
+): boolean {
+  return insertVertexCore(staticMaskParts(layer, mi), segIndex, x, y)
+}
+
+function insertVertexCore(
+  parts: { k: PathK; px: number; py: number } | null,
+  segIndex: number,
+  x: number,
+  y: number,
+): boolean {
   if (!parts) return false
   const { k, px, py } = parts
   if (segIndex < 0 || segIndex >= k.v.length) return false
@@ -228,7 +298,57 @@ export function insertVertex(layer: LottieLayer, segIndex: number, x: number, y:
 /** Delete a vertex, keeping at least 3 points on closed paths and 2 on
  *  open ones. */
 export function deleteVertex(layer: LottieLayer, index: number): boolean {
-  const parts = staticPathParts(layer)
+  return deleteVertexCore(staticPathParts(layer), index)
+}
+
+export function deleteMaskVertex(layer: LottieLayer, mi: number, index: number): boolean {
+  return deleteVertexCore(staticMaskParts(layer, mi), index)
+}
+
+export function moveMaskVertex(
+  layer: LottieLayer,
+  mi: number,
+  index: number,
+  x: number,
+  y: number,
+): boolean {
+  const parts = staticMaskParts(layer, mi)
+  if (!parts) return false
+  if (index < 0 || index >= parts.k.v.length) return false
+  parts.k.v[index] = [x - parts.px, y - parts.py]
+  return true
+}
+
+/** Bezier ellipse path (circle approximation, c ≈ 0.5523) in layer space. */
+export function makeEllipsePathK(cx: number, cy: number, rx: number, ry: number): PathK {
+  const c = 0.5523
+  return {
+    v: [
+      [cx, cy - ry],
+      [cx + rx, cy],
+      [cx, cy + ry],
+      [cx - rx, cy],
+    ],
+    i: [
+      [-rx * c, 0],
+      [0, -ry * c],
+      [rx * c, 0],
+      [0, ry * c],
+    ],
+    o: [
+      [rx * c, 0],
+      [0, ry * c],
+      [-rx * c, 0],
+      [0, -ry * c],
+    ],
+    c: true,
+  }
+}
+
+function deleteVertexCore(
+  parts: { k: PathK; px: number; py: number } | null,
+  index: number,
+): boolean {
   if (!parts) return false
   const k = parts.k
   const min = k.c ? 3 : 2
