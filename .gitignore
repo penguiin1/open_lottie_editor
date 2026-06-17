@@ -14,3 +14,6 @@ pnpm-debug.log*
 
 .DS_Store
 Thumbs.db
+
+# Local MCP client config (machine-specific absolute paths) — see mcp/README.md
+.mcp.json
