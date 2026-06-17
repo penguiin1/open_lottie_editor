@@ -123,6 +123,50 @@ export default function PropertiesPanel() {
             <span style={{ color: 'var(--text-dim)' }}>{(doc.op / doc.fr).toFixed(2)}s</span>
           </div>
         </section>
+        <div className="panel-title">Segments</div>
+        <section>
+          {(doc.markers ?? []).map((m: any, i: number) => (
+            <div className="prop-row" key={i}>
+              <input
+                type="text"
+                style={{ width: 90, flex: 1 }}
+                key={`${i}-${m.cm}`}
+                defaultValue={m.cm}
+                onBlur={(e) =>
+                  e.target.value.trim() && store().updateMarker(i, { name: e.target.value.trim() })
+                }
+              />
+              <NumberField
+                value={m.tm}
+                min={0}
+                max={doc.op}
+                onCommit={(n) => store().updateMarker(i, { start: n, end: m.tm + m.dr })}
+              />
+              <NumberField
+                value={m.tm + m.dr}
+                min={0}
+                max={doc.op}
+                onCommit={(n) => store().updateMarker(i, { end: n })}
+              />
+              <button className="link-btn" title="Remove segment" onClick={() => store().removeMarker(i)}>
+                ×
+              </button>
+            </div>
+          ))}
+          <div className="prop-row">
+            <button
+              onClick={() =>
+                store().addMarker(`segment ${(doc.markers?.length ?? 0) + 1}`, currentFrame, doc.op)
+              }
+            >
+              + Add segment at playhead
+            </button>
+          </div>
+          <div className="hint" style={{ padding: '0 0 4px 2px' }}>
+            Named frame ranges (Lottie markers). State machine states play these segments.
+          </div>
+        </section>
+
         <div className="hint">
           Select a layer to edit its transform and add keyframes. Tip: move the playhead, change a
           value, and a keyframe is created automatically once a property is animated (click ◇ to
@@ -164,6 +208,7 @@ export default function PropertiesPanel() {
 
   const transformRows: { key: TransformKey; label: string; dims: 1 | 2; min?: number; max?: number }[] = [
     { key: 'p', label: 'Position', dims: 2 },
+    { key: 'a', label: 'Anchor', dims: 2 },
     { key: 's', label: 'Scale %', dims: 2 },
     { key: 'r', label: 'Rotation', dims: 1 },
     { key: 'o', label: 'Opacity', dims: 1, min: 0, max: 100 },
@@ -181,6 +226,36 @@ export default function PropertiesPanel() {
             defaultValue={layer.nm}
             onBlur={(e) => e.target.value.trim() && store().renameLayer(ind, e.target.value.trim())}
           />
+        </div>
+        <div className="prop-row">
+          <label className="k">Parent</label>
+          <select
+            className="grow"
+            value={layer.parent ?? ''}
+            onChange={(e) =>
+              store().setParent(ind, e.target.value === '' ? null : Number(e.target.value))
+            }
+          >
+            <option value="">None</option>
+            {activeLayers
+              .filter((l) => {
+                if (l.ind === ind) return false
+                // exclude our own descendants (would create a cycle)
+                let cur: typeof l | undefined = l
+                const seen = new Set<number>()
+                while (cur && cur.parent != null && !seen.has(cur.ind)) {
+                  if (cur.parent === ind) return false
+                  seen.add(cur.ind)
+                  cur = activeLayers.find((x) => x.ind === cur!.parent)
+                }
+                return true
+              })
+              .map((l) => (
+                <option key={l.ind} value={l.ind}>
+                  {l.nm}
+                </option>
+              ))}
+          </select>
         </div>
       </section>
 

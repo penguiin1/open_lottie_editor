@@ -3,7 +3,13 @@ import { useStore } from '../store/useStore'
 import { importAnyFile } from '../io/dotlottie'
 import { SAMPLES } from '../samples/samples'
 
-export default function Toolbar({ onExport }: { onExport: () => void }) {
+export default function Toolbar({
+  onExport,
+  onInteractivity,
+}: {
+  onExport: () => void
+  onInteractivity: () => void
+}) {
   const fileRef = useRef<HTMLInputElement>(null)
   const newDoc = useStore((s) => s.newDoc)
   const loadDoc = useStore((s) => s.loadDoc)
@@ -67,6 +73,16 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
       <button onClick={() => addShapeLayer('ellipse')}>◯ Ellipse</button>
       <button onClick={() => addShapeLayer('star')}>✦ Star</button>
       <button onClick={addTextLayer}>T Text</button>
+      <button title="Null layer — invisible controller for parenting rigs" onClick={() => useStore.getState().addNullLayer()}>
+        ∅ Null
+      </button>
+      <button
+        className={useStore((s) => s.showBones) ? 'tool-active' : ''}
+        title="Show bones — visualize parent chains, drag pivots, IK posing"
+        onClick={() => useStore.getState().setShowBones(!useStore.getState().showBones)}
+      >
+        🦴 Bones
+      </button>
       <button
         className={tool === 'pen' ? 'tool-active' : ''}
         title="Pen tool — click on canvas to add points, double-click to finish, Esc to cancel"
@@ -86,6 +102,9 @@ export default function Toolbar({ onExport }: { onExport: () => void }) {
 
       <div className="spacer" />
 
+      <button title="State machine — make it interactive" onClick={onInteractivity}>
+        ⚡ Interactivity
+      </button>
       <button className="primary" onClick={onExport}>
         Export
       </button>

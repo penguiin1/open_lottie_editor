@@ -3,6 +3,7 @@ import lottie, { type AnimationItem } from 'lottie-web'
 import { layersFor, useStore } from '../store/useStore'
 import { getValue } from '../lottie/props'
 import { getMaskGeometry, getPathGeometry, type PathGeometry, type PenPoint } from '../lottie/path'
+import { parentOf, pivotWorld } from '../lottie/rig'
 
 function draftPathD(points: PenPoint[], scale: number): string {
   if (points.length === 0) return ''
@@ -31,6 +32,7 @@ export default function CanvasStage() {
   const tool = useStore((s) => s.tool)
   const compId = useStore((s) => s.compId)
   const compStack = useStore((s) => s.compStack)
+  const showBones = useStore((s) => s.showBones)
   const [stageSize, setStageSize] = useState({ w: 512, h: 512 })
   const [dragging, setDragging] = useState(false)
   const [draft, setDraft] = useState<PenPoint[]>([])
@@ -58,6 +60,26 @@ export default function CanvasStage() {
       if (g) geos.push({ geo: g, mi: i })
     })
   }
+
+  // Bone overlay: every parent→child link, drawn pivot to pivot.
+  const bones = showBones
+    ? layers
+        .filter((l) => l.parent != null)
+        .map((l) => {
+          const par = parentOf(layers, l)
+          if (!par) return null
+          return {
+            from: pivotWorld(layers, par, currentFrame),
+            to: pivotWorld(layers, l, currentFrame),
+          }
+        })
+        .filter((b): b is NonNullable<typeof b> => !!b)
+    : []
+  const selPivot = showBones && selLayer ? pivotWorld(layers, selLayer, currentFrame) : null
+  const selHasIK =
+    !!selLayer &&
+    !!parentOf(layers, selLayer) &&
+    !!parentOf(layers, parentOf(layers, selLayer)!)
 
   // Fit the stage to the available area, preserving the comp's aspect ratio.
   useEffect(() => {
@@ -314,6 +336,40 @@ export default function CanvasStage() {
     window.addEventListener('pointerup', up)
   }
 
+  /** Pivot handle: drag = 2-bone IK pose (when a grandparent exists),
+   *  Alt+drag = move the anchor without moving the artwork (pan-behind). */
+  const onPivotDown = (e: React.PointerEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
+    const st = useStore.getState()
+    if (st.selectedInd == null) return
+    const ind = st.selectedInd
+    const stage = (e.currentTarget as SVGElement).closest('.stage') as HTMLElement
+    st.setPlaying(false)
+    const ik = selHasIK && !e.altKey
+    let snapshotted = false
+    let last = toComp(e, stage)
+    const move = (ev: PointerEvent) => {
+      const pt = toComp(ev, stage)
+      if (!snapshotted) {
+        snapshotted = true
+        useStore.getState().beginEdit()
+      }
+      if (ik) {
+        useStore.getState().applyIK(ind, pt.x, pt.y, false)
+      } else {
+        useStore.getState().movePivot(ind, pt.x - last.x, pt.y - last.y, false)
+      }
+      last = pt
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
   const onMidDown = (
     e: React.PointerEvent,
     segIndex: number,
@@ -373,7 +429,7 @@ export default function CanvasStage() {
           }
         />
 
-        {(tool === 'pen' || geos.length > 0) && (
+        {(tool === 'pen' || geos.length > 0 || bones.length > 0 || selPivot) && (
           <svg className="editing-overlay" width={stageSize.w} height={stageSize.h}>
             {tool === 'pen' && draft.length > 0 && (
               <>
@@ -397,6 +453,40 @@ export default function CanvasStage() {
                   />
                 ))}
               </>
+            )}
+            {bones.map((b, i) => (
+              <g key={`bone${i}`}>
+                <line
+                  x1={b.from.x * scale}
+                  y1={b.from.y * scale}
+                  x2={b.to.x * scale}
+                  y2={b.to.y * scale}
+                  className="bone-line"
+                />
+                <circle cx={b.from.x * scale} cy={b.from.y * scale} r={3} className="bone-joint" />
+                <circle cx={b.to.x * scale} cy={b.to.y * scale} r={3} className="bone-joint" />
+              </g>
+            ))}
+            {selPivot && (
+              <g>
+                <circle
+                  cx={selPivot.x * scale}
+                  cy={selPivot.y * scale}
+                  r={7}
+                  className={`pivot-handle${selHasIK ? ' ik' : ''}`}
+                  onPointerDown={onPivotDown}
+                >
+                  <title>
+                    {selHasIK
+                      ? 'Drag: IK pose · Alt+drag: move anchor'
+                      : 'Drag: move anchor (artwork stays put)'}
+                  </title>
+                </circle>
+                <path
+                  d={`M ${selPivot.x * scale - 11} ${selPivot.y * scale} H ${selPivot.x * scale + 11} M ${selPivot.x * scale} ${selPivot.y * scale - 11} V ${selPivot.y * scale + 11}`}
+                  className="pivot-cross"
+                />
+              </g>
             )}
             {geos.map(({ geo, mi }) => {
               const mcls = mi != null ? ' mask' : ''

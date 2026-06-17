@@ -220,6 +220,17 @@ input[type='color'] {
   cursor: pointer; z-index: 2;
 }
 .kf-diamond:hover { background: #ffd166; }
+.ruler-marker {
+  position: absolute; bottom: 0; height: 8px;
+  background: rgba(48, 164, 108, .35);
+  border-left: 2px solid var(--ok);
+  pointer-events: none; overflow: visible;
+}
+.ruler-marker span {
+  position: absolute; bottom: 9px; left: 2px;
+  font-size: 9px; color: var(--ok); white-space: nowrap;
+}
+
 .playhead {
   position: absolute; top: 0; bottom: 0; width: 1px;
   background: #ff5c5c; z-index: 5; pointer-events: none;
@@ -268,6 +279,16 @@ button.tool-active {
 .path-handle-line.mask { stroke: #34d399; }
 .midpoint-marker.mask { stroke: #34d399; }
 
+.bone-line { stroke: #f59e0b; stroke-width: 2; opacity: .8; }
+.bone-joint { fill: #f59e0b; stroke: #1e1e27; stroke-width: 1; }
+.pivot-handle {
+  fill: rgba(245, 158, 11, .25); stroke: #f59e0b; stroke-width: 2;
+  pointer-events: auto; cursor: grab;
+}
+.pivot-handle.ik { fill: rgba(229, 72, 77, .3); stroke: var(--danger); }
+.pivot-handle:hover { fill: rgba(255, 255, 255, .35); }
+.pivot-cross { stroke: #f59e0b; stroke-width: 1; opacity: .7; pointer-events: none; }
+
 .crumbs {
   position: absolute; top: 10px; left: 12px; z-index: 10;
   display: flex; align-items: center; gap: 4px;
@@ -312,3 +333,10 @@ button.tool-active {
 .progress-track { height: 6px; background: var(--panel-2); border-radius: 99px; overflow: hidden; margin: 10px 0; }
 .progress-fill { height: 100%; background: var(--accent); transition: width .15s; }
 .export-error { color: var(--danger); font-size: 12px; margin-top: 8px; }
+.modal-wide { width: 560px; max-height: 84vh; overflow-y: auto; }
+.sm-section-title {
+  font-size: 11px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
+  color: var(--text-dim); margin: 14px 0 6px;
+}
+.sm-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
+.sm-row .dim { color: var(--text-dim); font-size: 12px; display: flex; align-items: center; gap: 4px; }

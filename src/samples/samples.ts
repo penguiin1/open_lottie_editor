@@ -304,8 +304,6 @@ function makeSuccessCheck(): LottieDoc {
   };
 }
 
-// ---------------------------------------------------------------------------
-
 export const SAMPLES: { name: string; make: () => LottieDoc }[] = [
   { name: 'Bouncing Ball', make: makeBouncingBall },
   { name: 'Pulse Loader', make: makePulseLoader },

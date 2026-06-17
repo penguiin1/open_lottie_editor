@@ -28,6 +28,7 @@ function trimIndex(layer: LottieLayer): number {
 
 const TKEYS: { key: TransformKey; label: string }[] = [
   { key: 'p', label: 'Position' },
+  { key: 'a', label: 'Anchor' },
   { key: 's', label: 'Scale' },
   { key: 'r', label: 'Rotation' },
   { key: 'o', label: 'Opacity' },
@@ -244,6 +245,19 @@ export default function Timeline() {
             {ticks.map((t) => (
               <div key={t} className="tick" style={{ left: pct(t) }}>
                 <span>{t}</span>
+              </div>
+            ))}
+            {(doc.markers ?? []).map((m: any, i: number) => (
+              <div
+                key={`m${i}`}
+                className="ruler-marker"
+                style={{
+                  left: pct(m.tm),
+                  width: `${(Math.max(0, Math.min(m.tm + m.dr, doc.op) - m.tm) / span) * 100}%`,
+                }}
+                title={`${m.cm} · ${m.tm}–${m.tm + m.dr}`}
+              >
+                <span>{m.cm}</span>
               </div>
             ))}
           </div>

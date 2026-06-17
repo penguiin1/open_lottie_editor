@@ -30,6 +30,8 @@ import {
   type PaintInfo,
 } from '../lottie/paint'
 import { applyCustomEasing, moveKeyframeTime } from '../lottie/props'
+import type { EditorSM } from '../lottie/statemachine'
+import { chainRot, chainScaleOK, solveTwoBoneIK } from '../lottie/rig'
 
 export type PropPath = (string | number)[]
 
@@ -78,9 +80,15 @@ interface EditorState {
   tool: Tool
   compId: string | null
   compStack: CompCrumb[]
+  showBones: boolean
   past: string[]
   future: string[]
   setTool: (t: Tool) => void
+  setShowBones: (v: boolean) => void
+  /** 2-bone IK: pose sel's parent+grandparent so sel's pivot reaches (x,y). */
+  applyIK: (ind: number, x: number, y: number, commit?: boolean) => void
+  /** Pan-behind: move the pivot without moving the content on screen. */
+  movePivot: (ind: number, dxComp: number, dyComp: number, commit?: boolean) => void
   enterComp: (layerInd: number) => void
   exitComp: (toDepth: number) => void
   // masks
@@ -108,6 +116,12 @@ interface EditorState {
   addShapeLayer: (kind: ShapeKind) => void
   addTextLayer: () => void
   addPenLayer: (points: PenPoint[], closed: boolean) => void
+  addNullLayer: () => void
+  setParent: (ind: number, parentInd: number | null) => void
+  // segment markers (root animation only)
+  addMarker: (name: string, start: number, end: number) => void
+  updateMarker: (index: number, patch: { name?: string; start?: number; end?: number }) => void
+  removeMarker: (index: number) => void
   deleteLayer: (ind: number) => void
   duplicateLayer: (ind: number) => void
   renameLayer: (ind: number, name: string) => void
@@ -151,6 +165,9 @@ interface EditorState {
   removePathAnimation: (ind: number, path: PropPath) => void
   setPathEasing: (ind: number, path: PropPath, easing: EasingName) => void
   movePathKeyframe: (ind: number, path: PropPath, from: number, to: number, commit?: boolean) => void
+  // interactivity (state machine lives on doc.__sm so it rides undo/history;
+  // it is stripped from exported animation JSON)
+  setStateMachine: (sm: EditorSM | null) => void
   // trim paths & track mattes
   addTrim: (ind: number) => void
   removeTrim: (ind: number) => void
@@ -222,10 +239,60 @@ export const useStore = create<EditorState>()(
       tool: 'select',
       compId: null,
       compStack: [],
+      showBones: false,
       past: [],
       future: [],
 
       setTool: (t) => set((s) => void (s.tool = t)),
+
+      setShowBones: (v) => set((s) => void (s.showBones = v)),
+
+      applyIK: (ind, x, y, commit = false) =>
+        set((s) => {
+          const layers = arr(s)
+          const sel = layers.find((l) => l.ind === ind)
+          if (!sel) return
+          if (commit) snapshot(s)
+          const sol = solveTwoBoneIK(layers, sel, s.currentFrame, x, y)
+          if (!sol) return
+          for (const [li, r] of [
+            [sol.rootInd, sol.rootR],
+            [sol.midInd, sol.midR],
+          ] as const) {
+            const l = layers.find((x2) => x2.ind === li)
+            if (!l?.ks?.r) continue
+            if (isAnimated(l.ks.r)) upsertKeyframe(l.ks.r, s.currentFrame, [r], s.defaultEasing)
+            else setStatic(l.ks.r, [r])
+          }
+        }),
+
+      movePivot: (ind, dxComp, dyComp, commit = false) =>
+        set((s) => {
+          const layers = arr(s)
+          const l = layers.find((x) => x.ind === ind)
+          if (!l) return
+          const pProp = l.ks?.p
+          const aProp = l.ks?.a
+          if (!pProp || pProp.a === 1 || (pProp as any).s === true) return
+          if (!aProp || aProp.a === 1) return
+          if (!chainScaleOK(layers, l, s.currentFrame)) return
+          if (commit) snapshot(s)
+          const parent = l.parent != null ? layers.find((x) => x.ind === l.parent) : undefined
+          const parentRot = parent ? chainRot(layers, parent, s.currentFrame) : 0
+          const selfRot = parentRot + (getPropValue(l.ks.r, s.currentFrame)[0] ?? 0)
+          const rotInto = (deg: number, vx: number, vy: number): [number, number] => {
+            const r = (-deg * Math.PI) / 180
+            return [vx * Math.cos(r) - vy * Math.sin(r), vx * Math.sin(r) + vy * Math.cos(r)]
+          }
+          // Pivot world moves by Δ ⇒ p moves by R_parent⁻¹·Δ; content stays
+          // fixed when a also moves by R_self⁻¹·Δ.
+          const [dpx, dpy] = rotInto(parentRot, dxComp, dyComp)
+          const [dax, day] = rotInto(selfRot, dxComp, dyComp)
+          const pv = getPropValue(pProp, s.currentFrame)
+          const av = getPropValue(aProp, s.currentFrame)
+          setStatic(pProp, [(pv[0] ?? 0) + dpx, (pv[1] ?? 0) + dpy, pv[2] ?? 0])
+          setStatic(aProp, [(av[0] ?? 0) + dax, (av[1] ?? 0) + day, av[2] ?? 0])
+        }),
 
       enterComp: (layerInd) =>
         set((s) => {
@@ -307,6 +374,129 @@ export const useStore = create<EditorState>()(
           if (s.compId) ensureFont(s.doc, FONTS[0].fName)
           layers.unshift(layer)
           s.selectedInd = ind
+        }),
+
+      addNullLayer: () =>
+        set((s) => {
+          snapshot(s)
+          const layers = arr(s)
+          const ind = maxInd(layers) + 1
+          const meta = hostMeta(s)
+          layers.unshift({
+            ddd: 0,
+            ind,
+            ty: 3,
+            nm: `Null ${ind}`,
+            sr: 1,
+            ks: {
+              o: { a: 0, k: 0 },
+              r: { a: 0, k: 0 },
+              p: { a: 0, k: [meta.w / 2, meta.h / 2, 0] },
+              a: { a: 0, k: [0, 0, 0] },
+              s: { a: 0, k: [100, 100, 100] },
+            },
+            ao: 0,
+            ip: s.doc.ip,
+            op: s.doc.op,
+            st: 0,
+          })
+          s.selectedInd = ind
+        }),
+
+      setParent: (ind, parentInd) =>
+        set((s) => {
+          const layers = arr(s)
+          const l = layers.find((x) => x.ind === ind)
+          if (!l) return
+          if (parentInd != null) {
+            if (parentInd === ind) return
+            let cur = layers.find((x) => x.ind === parentInd)
+            if (!cur) return
+            // Refuse cycles: walking up from the new parent must not reach us.
+            const seen = new Set<number>()
+            while (cur && cur.parent != null && !seen.has(cur.ind)) {
+              seen.add(cur.ind)
+              if (cur.parent === ind) return
+              cur = layers.find((x) => x.ind === cur!.parent)
+            }
+          }
+          snapshot(s)
+
+          // Static world offset of a layer's coordinate origin (sum of p - a
+          // up the parent chain). Null when any ancestor is animated/split —
+          // in that case we skip compensation rather than guess.
+          const worldOf = (start: LottieLayer | undefined): [number, number] | null => {
+            let px = 0
+            let py = 0
+            let cur = start
+            const seen = new Set<number>()
+            while (cur) {
+              const p = cur.ks?.p
+              const a = cur.ks?.a
+              if (!p || p.a === 1 || (p as any).s === true) return null
+              if (a && a.a === 1) return null
+              const pv = getPropValue(p, 0)
+              const av = a ? getPropValue(a, 0) : [0, 0]
+              px += (pv[0] ?? 0) - (av[0] ?? 0)
+              py += (pv[1] ?? 0) - (av[1] ?? 0)
+              if (cur.parent == null || seen.has(cur.ind)) break
+              seen.add(cur.ind)
+              cur = layers.find((y) => y.ind === cur!.parent)
+            }
+            return [px, py]
+          }
+
+          // Preserve the layer's on-screen position across (un)parenting,
+          // like AE/Figma do, when everything involved is static.
+          const childP = l.ks?.p
+          if (childP && childP.a !== 1 && !(childP as any).s) {
+            const oldParent = l.parent != null ? layers.find((y) => y.ind === l.parent) : undefined
+            const newParent = parentInd != null ? layers.find((y) => y.ind === parentInd) : undefined
+            const ow = oldParent ? worldOf(oldParent) : ([0, 0] as [number, number])
+            const nw = newParent ? worldOf(newParent) : ([0, 0] as [number, number])
+            if (ow && nw) {
+              const v = getPropValue(childP, 0)
+              setStatic(childP, [
+                (v[0] ?? 0) + ow[0] - nw[0],
+                (v[1] ?? 0) + ow[1] - nw[1],
+                v[2] ?? 0,
+              ])
+            }
+          }
+
+          if (parentInd == null) delete l.parent
+          else l.parent = parentInd
+        }),
+
+      addMarker: (name, start, end) =>
+        set((s) => {
+          snapshot(s)
+          if (!Array.isArray(s.doc.markers)) s.doc.markers = []
+          s.doc.markers.push({ tm: Math.round(start), cm: name, dr: Math.max(0, Math.round(end - start)) })
+          s.doc.markers.sort((a: any, b: any) => a.tm - b.tm)
+        }),
+
+      updateMarker: (index, patch) =>
+        set((s) => {
+          const m = s.doc.markers?.[index]
+          if (!m) return
+          snapshot(s)
+          if (patch.name != null) m.cm = patch.name
+          if (patch.start != null) {
+            const end = m.tm + m.dr
+            m.tm = Math.round(patch.start)
+            m.dr = Math.max(0, Math.round((patch.end ?? end) - m.tm))
+          } else if (patch.end != null) {
+            m.dr = Math.max(0, Math.round(patch.end - m.tm))
+          }
+          s.doc.markers.sort((a: any, b: any) => a.tm - b.tm)
+        }),
+
+      removeMarker: (index) =>
+        set((s) => {
+          if (!s.doc.markers?.[index]) return
+          snapshot(s)
+          s.doc.markers.splice(index, 1)
         }),
 
       addPenLayer: (points, closed) =>
@@ -656,6 +846,13 @@ export const useStore = create<EditorState>()(
           moveKeyframeTime(prop, from, clamped)
         }),
 
+      setStateMachine: (sm) =>
+        set((s) => {
+          snapshot(s)
+          if (sm == null) delete (s.doc as any).__sm
+          else (s.doc as any).__sm = sm
+        }),
+
       addTrim: (ind) =>
         set((s) => {
           const l = findLayer(s.doc, ind, s.compId)
@@ -820,7 +1017,7 @@ export const useStore = create<EditorState>()(
 
 /** Pad UI-supplied values to the dimension count Lottie expects. */
 function padDims(key: TransformKey, value: number[]): number[] {
-  if (key === 'p') {
+  if (key === 'p' || key === 'a') {
     if (value.length >= 3) return value.slice(0, 3)
     return [value[0] ?? 0, value[1] ?? 0, 0]
   }

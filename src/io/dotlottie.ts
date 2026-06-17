@@ -1,5 +1,6 @@
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate';
 import type { LottieDoc } from '../types/lottie';
+import { deserializeStateMachine } from '../lottie/statemachine';
 
 interface DotLottieManifestAnimation {
   id: string;
@@ -19,8 +20,24 @@ interface DotLottieManifest {
  * Package a Lottie document as a .lottie (dotLottie) zip archive.
  * Callers are responsible for naming the resulting file `*.lottie`.
  */
-export function exportDotLottie(doc: LottieDoc, id?: string): Blob {
+export function exportDotLottie(doc: LottieDoc, id?: string, stateMachine?: any): Blob {
   const animId = id ?? 'animation';
+  if (stateMachine) {
+    // dotLottie v2 layout (a/ + s/ folders) — required for state machines.
+    const smId = 'state_machine_1';
+    const manifest = {
+      version: '2',
+      generator: 'OpenLottie Studio',
+      animations: [{ id: animId }],
+      stateMachines: [{ id: smId }],
+    };
+    const zipped = zipSync({
+      'manifest.json': strToU8(JSON.stringify(manifest)),
+      [`a/${animId}.json`]: strToU8(JSON.stringify(doc)),
+      [`s/${smId}.json`]: strToU8(JSON.stringify(stateMachine)),
+    });
+    return new Blob([zipped], { type: 'application/zip' });
+  }
   const manifest: DotLottieManifest = {
     version: '1.0',
     generator: 'OpenLottie Studio',
@@ -47,15 +64,24 @@ export async function importDotLottie(
   }
 
   let animationPath: string | undefined;
+  let stateMachineJson: any | undefined;
+  let stateMachineId: string | undefined;
 
-  // Prefer the manifest to locate the first animation.
+  // Prefer the manifest to locate the first animation (v1 animations/ folder
+  // or v2 a/ folder) and any bundled state machine.
   const manifestBytes = entries['manifest.json'];
   if (manifestBytes) {
     try {
       const manifest = JSON.parse(strFromU8(manifestBytes)) as DotLottieManifest;
       const firstId = manifest.animations?.[0]?.id;
-      if (firstId && entries[`animations/${firstId}.json`]) {
-        animationPath = `animations/${firstId}.json`;
+      if (firstId) {
+        if (entries[`animations/${firstId}.json`]) animationPath = `animations/${firstId}.json`;
+        else if (entries[`a/${firstId}.json`]) animationPath = `a/${firstId}.json`;
+      }
+      const smId = (manifest as any).stateMachines?.[0]?.id;
+      if (smId && entries[`s/${smId}.json`]) {
+        stateMachineId = String(smId);
+        stateMachineJson = JSON.parse(strFromU8(entries[`s/${smId}.json`]));
       }
     } catch {
       // Malformed manifest: fall through to scanning entries.
@@ -64,7 +90,9 @@ export async function importDotLottie(
 
   // Fallback: first entry that looks like an animation JSON.
   if (!animationPath) {
-    animationPath = Object.keys(entries).find((p) => /^animations\/.+\.json$/.test(p));
+    animationPath = Object.keys(entries).find(
+      (p) => /^animations\/.+\.json$/.test(p) || /^a\/.+\.json$/.test(p),
+    );
   }
 
   if (!animationPath) {
@@ -73,7 +101,12 @@ export async function importDotLottie(
 
   const doc = JSON.parse(strFromU8(entries[animationPath])) as LottieDoc;
   inlineBundledImages(doc, entries);
-  const name = animationPath.replace(/^animations\//, '').replace(/\.json$/, '');
+  // Round-trip our own state machines back into the editor model.
+  if (stateMachineJson && stateMachineId) {
+    const sm = deserializeStateMachine(stateMachineJson, stateMachineId);
+    if (sm) (doc as any).__sm = sm;
+  }
+  const name = animationPath.replace(/^(animations|a)\//, '').replace(/\.json$/, '');
   return { doc, name };
 }
 

@@ -60,6 +60,6 @@ export interface LottieDoc {
   [key: string]: any
 }
 
-export type TransformKey = 'p' | 's' | 'r' | 'o'
+export type TransformKey = 'p' | 'a' | 's' | 'r' | 'o'
 
 export type EasingName = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut'

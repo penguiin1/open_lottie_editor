@@ -5,6 +5,7 @@ import CanvasStage from './components/CanvasStage'
 import PropertiesPanel from './components/PropertiesPanel'
 import Timeline from './components/Timeline'
 import ExportDialog from './components/ExportDialog'
+import InteractivityPanel from './components/InteractivityPanel'
 import { useStore } from './store/useStore'
 
 function isTyping(e: KeyboardEvent): boolean {
@@ -47,6 +48,7 @@ class ErrorBoundary extends React.Component<
 
 export default function App() {
   const [exportOpen, setExportOpen] = useState(false)
+  const [interactivityOpen, setInteractivityOpen] = useState(false)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -70,6 +72,8 @@ export default function App() {
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && s.selectedInd != null) {
         e.preventDefault()
         s.deleteLayer(s.selectedInd)
+      } else if (e.key === 'Escape' && s.tool !== 'pen' && s.selectedInd != null) {
+        s.selectLayer(null)
       } else if (e.key === 'ArrowLeft') {
         s.setPlaying(false)
         s.setFrame(s.currentFrame - (e.shiftKey ? 10 : 1))
@@ -85,12 +89,16 @@ export default function App() {
   return (
     <ErrorBoundary>
       <div className="app">
-        <Toolbar onExport={() => setExportOpen(true)} />
+        <Toolbar
+          onExport={() => setExportOpen(true)}
+          onInteractivity={() => setInteractivityOpen(true)}
+        />
         <LayerList />
         <CanvasStage />
         <PropertiesPanel />
         <Timeline />
         {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} />}
+        {interactivityOpen && <InteractivityPanel onClose={() => setInteractivityOpen(false)} />}
       </div>
     </ErrorBoundary>
   )

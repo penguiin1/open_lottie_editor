@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
-import { downloadBlob, exportJson } from '../io/download'
+import { cleanDoc, downloadBlob, exportJson } from '../io/download'
 import { exportDotLottie } from '../io/dotlottie'
+import { serializeStateMachine, type EditorSM } from '../lottie/statemachine'
 import { exportGif } from '../io/exportGif'
 import { exportWebM } from '../io/exportVideo'
 
@@ -27,7 +28,9 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
         exportJson(doc, fileName)
         onClose()
       } else if (format === 'dotlottie') {
-        downloadBlob(exportDotLottie(doc), `${fileName}.lottie`)
+        const sm = (doc as any).__sm as EditorSM | undefined
+        const smJson = sm && sm.states.length > 0 ? serializeStateMachine(sm) : undefined
+        downloadBlob(exportDotLottie(cleanDoc(doc), fileName, smJson), `${fileName}.lottie`)
         onClose()
       } else {
         const total = Math.max(1, Math.round(doc.op - doc.ip))
@@ -77,7 +80,7 @@ export default function ExportDialog({ onClose }: { onClose: () => void }) {
     {
       id: 'dotlottie',
       title: 'dotLottie (.lottie)',
-      desc: 'Zipped Lottie — smaller file, same animation.',
+      desc: 'Zipped Lottie — includes your state machine (interactivity) if defined.',
     },
     {
       id: 'gif',

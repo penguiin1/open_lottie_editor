@@ -28,6 +28,19 @@ inside the browser.
   luma-inverted matte.
 - Precomps: step into precomp layers with breadcrumb navigation and edit their
   contents directly.
+- Rigging: layer parenting with on-screen position compensation and cycle
+  protection, plus invisible null-layer controllers for cutout rigs.
+- Bones: toggle a bone overlay for parent chains, edit anchor points (keyframable,
+  with pan-behind pivot dragging that keeps artwork in place), and pose limbs with
+  an analytic 2-bone IK solver — drag a hand and the elbow solves. Poses are
+  written as plain rotation keyframes, so exports stay 100% Lottie-compatible.
+- Interactivity: define named segments, then build dotLottie v2 state machines
+  (states play segments; Click/Pointer/OnComplete transitions) with a live test
+  that runs the official dotlottie-web WASM runtime in the editor. Exported
+  .lottie files carry the state machine and run on the official MIT players.
+- Advanced interactivity: hover states backed by Boolean inputs (robust across
+  state changes), tweened transitions with duration and easing, and per-layer
+  hit-testing so a trigger only fires on a specific layer.
 - Timeline: scrub, play, retime layer bars, view aggregate keyframes, expand
   selected properties, drag keyframe diamonds, and Alt-click to delete keys.
 - Import: open Lottie JSON and dotLottie files, including bundled image assets.

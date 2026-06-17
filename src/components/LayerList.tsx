@@ -26,7 +26,13 @@ export default function LayerList() {
       <div className="panel-title">
         Layers{compStack.length > 0 ? ` · ${compStack[compStack.length - 1].name}` : ''}
       </div>
-      <div className="layer-rows">
+      <div
+        className="layer-rows"
+        onClick={(e) => {
+          // clicking empty space below the rows deselects (shows comp panel)
+          if (e.target === e.currentTarget) useStore.getState().selectLayer(null)
+        }}
+      >
         {layers.length === 0 && (
           <div className="empty">
             No layers yet.
